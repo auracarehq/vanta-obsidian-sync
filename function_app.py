@@ -5,6 +5,7 @@ import json
 from datetime import datetime, UTC
 import os
 import subprocess
+import re
 
 app = func.FunctionApp()
 
@@ -12,8 +13,8 @@ app = func.FunctionApp()
                    use_monitor=False)
 def vanta_sync_timer(myTimer: func.TimerRequest) -> None:
     """
-    Azure Function that syncs Vanta security tests & checks to Obsidian vault every 6 hours.
-    Uses Obsidian CLI to write directly to the vault via Obsidian Sync.
+    Azure Function that syncs Vanta security tests to Obsidian vault as tasks every 6 hours.
+    Creates tasks in Projects/Compliance_tasks/ for each failing test.
     """
     if myTimer.past_due:
         logging.info('The timer is past due!')
@@ -23,7 +24,7 @@ def vanta_sync_timer(myTimer: func.TimerRequest) -> None:
     # Get credentials from environment variables
     vanta_client_id = os.environ.get('VANTA_CLIENT_ID')
     vanta_client_secret = os.environ.get('VANTA_CLIENT_SECRET')
-    obsidian_vault_path = os.environ.get('OBSIDIAN_VAULT_PATH', 'Compliance/Vanta')
+    vault_name = os.environ.get('OBSIDIAN_VAULT_NAME', 'dkg')
 
     if not vanta_client_id or not vanta_client_secret:
         logging.error('Missing Vanta OAuth credentials in environment variables')
@@ -61,13 +62,24 @@ def vanta_sync_timer(myTimer: func.TimerRequest) -> None:
         # Vanta API returns {results: {data: [...], pageInfo: {...}}}
         results = response_json.get('results', {})
         tests = results.get('data', [])
-        tests_data = {'results': tests}  # Normalize for markdown generation
 
-        # Step 3: Generate markdown content
-        markdown_content = generate_vanta_markdown(tests_data)
+        # Step 3: Create Compliance project if needed
+        create_compliance_project(vault_name)
 
-        # Step 4: Write to Obsidian vault using Obsidian CLI
-        write_to_obsidian_vault(obsidian_vault_path, markdown_content)
+        # Step 4: Create tasks for failing tests
+        failing_tests = [t for t in tests if t.get('status') == 'FAILING']
+        warning_tests = [t for t in tests if t.get('status') == 'WARNING']
+
+        logging.info(f'Found {len(failing_tests)} failing tests and {len(warning_tests)} warnings')
+
+        for test in failing_tests:
+            create_task_from_test(vault_name, test, priority='high')
+
+        for test in warning_tests:
+            create_task_from_test(vault_name, test, priority='medium')
+
+        # Step 5: Also create summary report
+        create_summary_report(vault_name, tests)
 
         logging.info('Vanta sync completed successfully at %s', datetime.now(UTC))
 
@@ -79,144 +91,180 @@ def vanta_sync_timer(myTimer: func.TimerRequest) -> None:
         raise
 
 
-def generate_vanta_markdown(tests_data):
-    """Generate markdown content from Vanta tests data."""
-    now = datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')
+def create_compliance_project(vault_name):
+    """Create or update the Compliance project file."""
+    now = datetime.now(UTC).strftime('%Y-%m-%d')
 
-    md = f"""---
-title: Vanta Security Tests
-updated: {now}
-tags: [compliance, vanta, security]
+    project_content = f"""---
+type: pm-project
+tags: [project/compliance, vanta]
+icon: ""
+status: active
 ---
 
-# Vanta Security Tests & Checks
+# Compliance
 
-> Last synced: {now}
+Automated compliance tracking from Vanta security tests.
 
-## Summary
+**Auto-synced:** Every 6 hours from Vanta API
 
+## Overview
+
+This project tracks security compliance issues identified by Vanta. Tasks are automatically created for:
+- ❌ Failing tests (high priority)
+- ⚠️ Warning tests (medium priority)
+
+## Links
+
+- [[Compliance/Vanta/Vanta Security Tests]] - Latest test summary
+- [Vanta Dashboard](https://app.vanta.com) - Full interface
+
+---
+
+*Last updated: {now}*
 """
 
-    tests = tests_data.get('results', [])
+    cmd = [
+        'obsidian',
+        'create',
+        f'vault={vault_name}',
+        'path=Projects/Compliance',
+        f'content={project_content}',
+        'overwrite'
+    ]
 
-    # Count tests by status
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    logging.info('Created/updated Compliance project')
+
+
+def create_task_from_test(vault_name, test, priority='medium'):
+    """Create a task file for a failing Vanta test."""
+    test_id = test.get('id', 'unknown')
+    test_name = test.get('name', 'Unknown Test')
+    test_status = test.get('status', 'UNKNOWN')
+    description = test.get('description', 'No description available')
+    remediation = test.get('remediation', 'No remediation steps provided')
+
+    # Sanitize test_id for filename
+    safe_id = re.sub(r'[^a-z0-9-]', '-', test_id.lower())
+
+    now = datetime.now(UTC)
+    created = now.strftime('%Y-%m-%d')
+    due_date = now.replace(day=now.day + 7).strftime('%Y-%m-%d')  # 7 days from now
+
+    status_emoji = '❌' if test_status == 'FAILING' else '⚠️'
+
+    task_content = f"""---
+type: task
+tags: [compliance, vanta, {test_status.lower()}]
+icon: ""
+status: todo
+priority: {priority}
+created: {created}
+due: {due_date}
+---
+
+# {status_emoji} {test_name}
+
+**Vanta Test ID:** `{test_id}`
+**Status:** {test_status}
+**Priority:** {priority.capitalize()}
+
+## Description
+
+{description}
+
+## Remediation Steps
+
+{remediation}
+
+## Links
+
+- [View in Vanta](https://app.vanta.com/tests/{test_id})
+- [[Compliance/Vanta/Vanta Security Tests]] - Full test report
+
+---
+
+*Auto-created from Vanta sync*
+"""
+
+    task_path = f"Projects/Compliance_tasks/{safe_id}"
+
+    cmd = [
+        'obsidian',
+        'create',
+        f'vault={vault_name}',
+        f'path={task_path}',
+        f'content={task_content}',
+        'overwrite'
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    logging.info(f'Created task: {task_path}')
+
+
+def create_summary_report(vault_name, tests):
+    """Create summary report in Compliance/Vanta folder."""
+    now = datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')
+    timestamp = datetime.now(UTC).strftime('%Y-%m-%d')
+
     passing = sum(1 for t in tests if t.get('status') == 'PASSING')
     failing = sum(1 for t in tests if t.get('status') == 'FAILING')
     warning = sum(1 for t in tests if t.get('status') == 'WARNING')
     total = len(tests)
 
-    md += f"""- **Total Tests**: {total}
+    summary_content = f"""---
+title: Vanta Security Tests Summary
+updated: {now}
+tags: [compliance, vanta, security]
+---
+
+# Vanta Security Tests Summary
+
+> Last synced: {now}
+
+## Statistics
+
+- **Total Tests**: {total}
 - **Passing**: ✅ {passing}
 - **Failing**: ❌ {failing}
 - **Warnings**: ⚠️ {warning}
 
----
+## Tasks Created
 
-## Failing Tests
+Failing and warning tests are automatically created as tasks in:
+- [[Projects/Compliance]] - Compliance project
+- `Projects/Compliance_tasks/` - Individual task files
 
-"""
-
-    failing_tests = [t for t in tests if t.get('status') == 'FAILING']
-    if failing_tests:
-        for test in failing_tests:
-            md += f"""### ❌ {test.get('displayName', 'Unknown Test')}
-
-**ID**: `{test.get('id', 'N/A')}`
-**Status**: {test.get('status', 'UNKNOWN')}
-**Description**: {test.get('description', 'No description available')}
-
-"""
-            if test.get('remediation'):
-                md += f"**Remediation**: {test['remediation']}\n\n"
-
-            md += "---\n\n"
-    else:
-        md += "No failing tests! 🎉\n\n"
-
-    md += "## Warning Tests\n\n"
-
-    warning_tests = [t for t in tests if t.get('status') == 'WARNING']
-    if warning_tests:
-        for test in warning_tests:
-            md += f"""### ⚠️ {test.get('displayName', 'Unknown Test')}
-
-**ID**: `{test.get('id', 'N/A')}`
-**Status**: {test.get('status', 'UNKNOWN')}
-**Description**: {test.get('description', 'No description available')}
-
----
-
-"""
-    else:
-        md += "No warnings.\n\n"
-
-    md += """## Passing Tests
+## All Tests
 
 """
 
-    passing_tests = [t for t in tests if t.get('status') == 'PASSING']
-    if passing_tests:
-        md += "| Test Name | ID |\n|-----------|----|\n"
-        for test in passing_tests:
-            name = test.get('displayName', 'Unknown')
+    # Group by status
+    for status in ['FAILING', 'WARNING', 'PASSING']:
+        status_tests = [t for t in tests if t.get('status') == status]
+        if not status_tests:
+            continue
+
+        emoji = {'FAILING': '❌', 'WARNING': '⚠️', 'PASSING': '✅'}[status]
+        summary_content += f"\n### {emoji} {status.capitalize()} ({len(status_tests)})\n\n"
+
+        for test in status_tests:
+            name = test.get('name', 'Unknown')
             test_id = test.get('id', 'N/A')
-            md += f"| ✅ {name} | `{test_id}` |\n"
+            summary_content += f"- {name} (`{test_id}`)\n"
 
-    md += "\n---\n\n*Automatically generated by Vanta sync function*\n"
+    summary_content += "\n---\n\n*Automatically generated by Vanta sync function*\n"
 
-    return md
+    # Write to Compliance/Vanta folder
+    cmd = [
+        'obsidian',
+        'create',
+        f'vault={vault_name}',
+        'path=Compliance/Vanta/Vanta Security Tests',
+        f'content={summary_content}',
+        'overwrite'
+    ]
 
-
-def write_to_obsidian_vault(vault_path, content):
-    """Write content to Obsidian vault using Obsidian CLI."""
-    try:
-        timestamp = datetime.now(UTC).strftime('%Y-%m-%d')
-        filename = f"Vanta Security Tests - {timestamp}"
-        full_path = f"{vault_path}/{filename}"
-        vault_name = os.environ.get('OBSIDIAN_VAULT_NAME', 'dkg')
-
-        # Use Obsidian CLI 'create' command with overwrite flag
-        # Syntax: obsidian create vault=<name> path=<path> content=<text> overwrite
-        cmd = [
-            'obsidian',
-            'create',
-            f'vault={vault_name}',
-            f'path={full_path}',
-            f'content={content}',
-            'overwrite'
-        ]
-
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True
-        )
-
-        logging.info(f'Successfully wrote to Obsidian vault: {full_path}')
-        logging.info(f'Obsidian CLI output: {result.stdout}')
-
-        # Also create/update an index file that always has the latest
-        index_content = content.replace(
-            f"Vanta Security Tests - {timestamp}",
-            "Vanta Security Tests - Latest"
-        )
-
-        cmd_index = [
-            'obsidian',
-            'create',
-            f'vault={vault_name}',
-            f'path={vault_path}/Vanta Security Tests',
-            f'content={index_content}',
-            'overwrite'
-        ]
-
-        subprocess.run(cmd_index, capture_output=True, text=True, check=True)
-        logging.info(f'Successfully updated index file')
-
-    except subprocess.CalledProcessError as e:
-        logging.error(f'Obsidian CLI failed: {e.stderr}')
-        raise
-    except Exception as e:
-        logging.error(f'Failed to write to Obsidian vault: {str(e)}')
-        raise
+    subprocess.run(cmd, capture_output=True, text=True, check=True)
+    logging.info('Created summary report')
