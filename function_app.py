@@ -50,25 +50,45 @@ def vanta_sync_timer(myTimer: func.TimerRequest) -> None:
             'Accept': 'application/json'
         }
 
-        # Step 2: Fetch security tests from Vanta API
+        # Step 2: Fetch ALL security tests from Vanta API (with pagination)
         logging.info('Fetching security tests from Vanta API')
-        tests_response = requests.get(
-            'https://api.vanta.com/v1/tests',
-            headers=headers
-        )
-        tests_response.raise_for_status()
-        response_json = tests_response.json()
+        all_tests = []
+        cursor = None
+        page = 1
 
-        # Vanta API returns {results: {data: [...], pageInfo: {...}}}
-        results = response_json.get('results', {})
-        tests = results.get('data', [])
+        while True:
+            url = 'https://api.vanta.com/v1/tests'
+            if cursor:
+                url += f'?after={cursor}'
+
+            tests_response = requests.get(url, headers=headers)
+            tests_response.raise_for_status()
+            response_json = tests_response.json()
+
+            # Vanta API returns {results: {data: [...], pageInfo: {...}}}
+            results = response_json.get('results', {})
+            page_tests = results.get('data', [])
+            page_info = results.get('pageInfo', {})
+
+            all_tests.extend(page_tests)
+            logging.info(f'Fetched page {page}: {len(page_tests)} tests')
+
+            if not page_info.get('hasNextPage'):
+                break
+
+            cursor = page_info.get('endCursor')
+            page += 1
+
+        tests = all_tests
+        logging.info(f'Total tests fetched: {len(tests)}')
 
         # Step 3: Create Compliance project if needed
         create_compliance_project(vault_name)
 
         # Step 4: Create tasks for failing tests
-        failing_tests = [t for t in tests if t.get('status') == 'FAILING']
-        warning_tests = [t for t in tests if t.get('status') == 'WARNING']
+        # Vanta uses: OK, NEEDS_ATTENTION, FAIL, DEACTIVATED
+        failing_tests = [t for t in tests if t.get('status') in ['FAIL', 'NEEDS_ATTENTION']]
+        warning_tests = []  # Vanta doesn't have separate warning status
 
         logging.info(f'Found {len(failing_tests)} failing tests and {len(warning_tests)} warnings')
 
@@ -208,9 +228,9 @@ def create_summary_report(vault_name, tests):
     now = datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')
     timestamp = datetime.now(UTC).strftime('%Y-%m-%d')
 
-    passing = sum(1 for t in tests if t.get('status') == 'PASSING')
-    failing = sum(1 for t in tests if t.get('status') == 'FAILING')
-    warning = sum(1 for t in tests if t.get('status') == 'WARNING')
+    passing = sum(1 for t in tests if t.get('status') == 'OK')
+    failing = sum(1 for t in tests if t.get('status') in ['FAIL', 'NEEDS_ATTENTION'])
+    deactivated = sum(1 for t in tests if t.get('status') == 'DEACTIVATED')
     total = len(tests)
 
     summary_content = f"""---
@@ -226,9 +246,9 @@ tags: [compliance, vanta, security]
 ## Statistics
 
 - **Total Tests**: {total}
-- **Passing**: ✅ {passing}
-- **Failing**: ❌ {failing}
-- **Warnings**: ⚠️ {warning}
+- **Passing (OK)**: ✅ {passing}
+- **Needs Attention**: ❌ {failing}
+- **Deactivated**: 🚫 {deactivated}
 
 ## Tasks Created
 
@@ -241,13 +261,19 @@ Failing and warning tests are automatically created as tasks in:
 """
 
     # Group by status
-    for status in ['FAILING', 'WARNING', 'PASSING']:
-        status_tests = [t for t in tests if t.get('status') == status]
+    status_map = {
+        'NEEDS_ATTENTION': ('❌', 'Needs Attention'),
+        'FAIL': ('❌', 'Failed'),
+        'OK': ('✅', 'Passing'),
+        'DEACTIVATED': ('🚫', 'Deactivated')
+    }
+
+    for status_key, (emoji, label) in status_map.items():
+        status_tests = [t for t in tests if t.get('status') == status_key]
         if not status_tests:
             continue
 
-        emoji = {'FAILING': '❌', 'WARNING': '⚠️', 'PASSING': '✅'}[status]
-        summary_content += f"\n### {emoji} {status.capitalize()} ({len(status_tests)})\n\n"
+        summary_content += f"\n### {emoji} {label} ({len(status_tests)})\n\n"
 
         for test in status_tests:
             name = test.get('name', 'Unknown')
