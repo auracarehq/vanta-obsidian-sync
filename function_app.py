@@ -33,12 +33,13 @@ def vanta_sync_timer(myTimer: func.TimerRequest) -> None:
         # Step 1: Get OAuth access token from Vanta
         token_response = requests.post(
             'https://api.vanta.com/oauth/token',
-            data={
-                'grant_type': 'client_credentials',
+            headers={'Content-Type': 'application/json'},
+            json={
                 'client_id': vanta_client_id,
-                'client_secret': vanta_client_secret
-            },
-            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+                'client_secret': vanta_client_secret,
+                'scope': 'vanta-api.all:read',
+                'grant_type': 'client_credentials'
+            }
         )
         token_response.raise_for_status()
         access_token = token_response.json()['access_token']
@@ -55,7 +56,12 @@ def vanta_sync_timer(myTimer: func.TimerRequest) -> None:
             headers=headers
         )
         tests_response.raise_for_status()
-        tests_data = tests_response.json()
+        response_json = tests_response.json()
+
+        # Vanta API returns {results: {data: [...], pageInfo: {...}}}
+        results = response_json.get('results', {})
+        tests = results.get('data', [])
+        tests_data = {'results': tests}  # Normalize for markdown generation
 
         # Step 3: Generate markdown content
         markdown_content = generate_vanta_markdown(tests_data)

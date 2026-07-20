@@ -11,8 +11,8 @@ from datetime import datetime
 import os
 
 # Configuration - update these if needed
-VANTA_CLIENT_ID = "vci_0c07415a383df9d0b51c0632cfd9054707cdb45b52c933d7"
-VANTA_CLIENT_SECRET = "vcs_a7ddb1_29208354d0e18271e7dd588d690ce9081792e5cc19ee3c5c3f9ad2d347fdeb12"
+VANTA_CLIENT_ID = "vci_0c07415a383df9d0b51c0632cfd9054707cab45b52c933d7"
+VANTA_CLIENT_SECRET = "vcs_0f13cb_9cc81e1480ccf46bd9143d4c81e557e23008a0a915568b1c98b680c4dd89a666"
 OBSIDIAN_VAULT_PATH = "Compliance/Vanta"
 
 def test_vanta_api():
@@ -20,39 +20,27 @@ def test_vanta_api():
     print("🔐 Testing Vanta OAuth...")
 
     try:
-        # Try method 1: Direct API key (some APIs use the secret directly)
-        print("Trying direct API key authentication...")
-        headers = {
-            'Authorization': f'Bearer {VANTA_CLIENT_SECRET}',
-            'Accept': 'application/json'
-        }
+        # Get OAuth access token using JSON body (Vanta's documented method)
+        print("Authenticating with Vanta OAuth...")
 
-        test_response = requests.get(
-            'https://api.vanta.com/v1/tests',
-            headers=headers
+        token_response = requests.post(
+            'https://api.vanta.com/oauth/token',
+            headers={'Content-Type': 'application/json'},
+            json={
+                'client_id': VANTA_CLIENT_ID,
+                'client_secret': VANTA_CLIENT_SECRET,
+                'scope': 'vanta-api.all:read',
+                'grant_type': 'client_credentials'
+            }
         )
 
-        if test_response.status_code == 200:
-            print("✅ Successfully authenticated with Vanta (API key)")
-            access_token = VANTA_CLIENT_SECRET
-        else:
-            # Try method 2: OAuth with form data
-            print(f"Direct auth failed ({test_response.status_code}), trying OAuth...")
+        print(f"Response status: {token_response.status_code}")
+        if token_response.status_code != 200:
+            print(f"Response body: {token_response.text}")
 
-            token_response = requests.post(
-                'https://api.vanta.com/oauth/token',
-                data={
-                    'grant_type': 'client_credentials',
-                    'client_id': VANTA_CLIENT_ID,
-                    'client_secret': VANTA_CLIENT_SECRET
-                },
-                headers={'Content-Type': 'application/x-www-form-urlencoded'}
-            )
-
-            print(f"OAuth response: {token_response.status_code} - {token_response.text[:200]}")
-            token_response.raise_for_status()
-            access_token = token_response.json()['access_token']
-            print("✅ Successfully authenticated with Vanta (OAuth)")
+        token_response.raise_for_status()
+        access_token = token_response.json()['access_token']
+        print("✅ Successfully authenticated with Vanta")
 
         # Fetch tests
         print("\n📊 Fetching security tests...")
@@ -66,10 +54,15 @@ def test_vanta_api():
             headers=headers
         )
         tests_response.raise_for_status()
-        tests_data = tests_response.json()
+        response_json = tests_response.json()
 
-        tests = tests_data.get('results', [])
-        passing = sum(1 for t in tests if t.get('status') == 'PASSING')
+        # Vanta API returns {results: {data: [...], pageInfo: {...}}}
+        results = response_json.get('results', {})
+        tests = results.get('data', [])
+
+        tests_data = {'results': tests}  # Normalize for downstream processing
+
+        passing = sum(1 for t in tests if isinstance(t, dict) and t.get('status') == 'PASSING')
         failing = sum(1 for t in tests if t.get('status') == 'FAILING')
         warning = sum(1 for t in tests if t.get('status') == 'WARNING')
 
