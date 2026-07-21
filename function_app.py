@@ -85,18 +85,22 @@ def vanta_sync_timer(myTimer: func.TimerRequest) -> None:
         # Step 3: Create Compliance project if needed
         create_compliance_project(vault_name)
 
-        # Step 4: Create tasks for failing tests
-        # Vanta uses: OK, NEEDS_ATTENTION, FAIL, DEACTIVATED
+        # Step 4: Create tasks for ALL tests
+        # Passing tests (OK) = completed tasks assigned to user with points
+        # Failing tests (FAIL, NEEDS_ATTENTION) = todo tasks
+        passing_tests = [t for t in tests if t.get('status') == 'OK']
         failing_tests = [t for t in tests if t.get('status') in ['FAIL', 'NEEDS_ATTENTION']]
-        warning_tests = []  # Vanta doesn't have separate warning status
 
-        logging.info(f'Found {len(failing_tests)} failing tests and {len(warning_tests)} warnings')
+        logging.info(f'Found {len(passing_tests)} passing tests, {len(failing_tests)} failing tests')
 
+        # Create completed tasks for passing tests (user gets credit!)
+        for test in passing_tests:
+            create_task_from_test(vault_name, test, priority='low', status='completed', assignee='Ahnaf')
+
+        # Create todo tasks for failing tests
         for test in failing_tests:
-            create_task_from_test(vault_name, test, priority='high')
-
-        for test in warning_tests:
-            create_task_from_test(vault_name, test, priority='medium')
+            priority = 'high' if test.get('status') == 'FAIL' else 'medium'
+            create_task_from_test(vault_name, test, priority=priority, status='todo', assignee=None)
 
         # Step 5: Also create summary report
         create_summary_report(vault_name, tests)
@@ -157,8 +161,8 @@ This project tracks security compliance issues identified by Vanta. Tasks are au
     logging.info('Created/updated Compliance project')
 
 
-def create_task_from_test(vault_name, test, priority='medium'):
-    """Create a task file for a failing Vanta test."""
+def create_task_from_test(vault_name, test, priority='medium', status='todo', assignee=None):
+    """Create a task file for a Vanta test."""
     test_id = test.get('id', 'unknown')
     test_name = test.get('name', 'Unknown Test')
     test_status = test.get('status', 'UNKNOWN')
@@ -170,43 +174,57 @@ def create_task_from_test(vault_name, test, priority='medium'):
 
     now = datetime.now(UTC)
     created = now.strftime('%Y-%m-%d')
-    due_date = now.replace(day=now.day + 7).strftime('%Y-%m-%d')  # 7 days from now
+    completed = created if status == 'completed' else None
+    due_date = None if status == 'completed' else now.replace(day=now.day + 7).strftime('%Y-%m-%d')
 
-    status_emoji = '❌' if test_status == 'FAILING' else '⚠️'
+    # Status emoji
+    if test_status == 'OK':
+        status_emoji = '✅'
+    elif test_status == 'FAIL':
+        status_emoji = '❌'
+    else:
+        status_emoji = '⚠️'
 
-    task_content = f"""---
+    # Points for passing tests (1 point each)
+    points = 1 if status == 'completed' else 0
+
+    # Build frontmatter
+    frontmatter = f"""---
 type: task
 tags: [compliance, vanta, {test_status.lower()}]
 icon: ""
-status: todo
+status: {status}
 priority: {priority}
-created: {created}
-due: {due_date}
----
+created: {created}"""
 
-# {status_emoji} {test_name}
+    if completed:
+        frontmatter += f"\ncompleted: {completed}"
+    if due_date:
+        frontmatter += f"\ndue: {due_date}"
+    if assignee:
+        frontmatter += f"\nassignees: {assignee}"
+    if points > 0:
+        frontmatter += f"\npoints: {points}"
 
-**Vanta Test ID:** `{test_id}`
-**Status:** {test_status}
-**Priority:** {priority.capitalize()}
+    frontmatter += "\n---\n"
 
-## Description
+    # Build body
+    body = f"\n# {status_emoji} {test_name}\n\n**Vanta Test ID:** `{test_id}`\n**Status:** {test_status}\n**Priority:** {priority.capitalize()}\n"
 
-{description}
+    if assignee:
+        body += f"\nAssignee: [[{assignee}]]\n"
 
-## Remediation Steps
+    if status == 'completed':
+        body += f"\n✅ **Completed:** This test is passing!\n"
 
-{remediation}
+    body += f"\n## Description\n\n{description}\n"
 
-## Links
+    if status != 'completed' and remediation:
+        body += f"\n## Remediation Steps\n\n{remediation}\n"
 
-- [View in Vanta](https://app.vanta.com/tests/{test_id})
-- [[Compliance/Vanta/Vanta Security Tests]] - Full test report
+    body += f"\n## Links\n\n- [View in Vanta](https://app.vanta.com/tests/{test_id})\n- [[Compliance/Vanta/Vanta Security Tests]] - Full test report\n\n---\n\n*Auto-created from Vanta sync*\n"
 
----
-
-*Auto-created from Vanta sync*
-"""
+    task_content = frontmatter + body
 
     task_path = f"Projects/Compliance_tasks/{safe_id}"
 

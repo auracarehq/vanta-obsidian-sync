@@ -6,7 +6,7 @@ echo "=================================================="
 
 # Configuration
 RESOURCE_GROUP="auracare-rg"
-LOCATION="eastus"
+LOCATION="uksouth"
 STORAGE_ACCOUNT="auracarevantsync"
 FUNCTION_APP="vanta-obsidian-sync"
 CONTAINER_REGISTRY="auracareacr"
