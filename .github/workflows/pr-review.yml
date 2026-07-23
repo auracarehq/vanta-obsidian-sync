@@ -1,0 +1,98 @@
+name: AI PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        id: diff
+        run: |
+          git diff origin/${{ github.base_ref }}...HEAD -- \
+            ':!*.lock' ':!*.sum' ':!dist/*' ':!build/*' ':!*.min.js' \
+            > /tmp/pr.diff
+          # Truncate to ~80k chars to stay within token limits
+          python3 -c "
+          with open('/tmp/pr.diff') as f:
+              diff = f.read()
+          print(diff[:80000] + ('\n[...diff truncated...]' if len(diff) > 80000 else ''))
+          " > /tmp/pr_truncated.diff
+          echo "diff_size=$(wc -c < /tmp/pr_truncated.diff)" >> $GITHUB_OUTPUT
+
+      - name: Review with Azure OpenAI
+        if: steps.diff.outputs.diff_size != '0'
+        env:
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          DIFF=$(cat /tmp/pr_truncated.diff)
+          PAYLOAD=$(python3 -c "
+          import json, os
+          diff = open('/tmp/pr_truncated.diff').read()
+          pr_title = os.environ.get('PR_TITLE', '')
+          pr_body = os.environ.get('PR_BODY', '') or ''
+          system = '''You are a senior software engineer conducting a thorough code review for Auracare — a UK digital health platform.
+
+          Review for:
+          1. **Bugs & correctness** — logic errors, off-by-one, null/race conditions, wrong assumptions
+          2. **Security** — auth bypass, injection, sensitive data exposure, OWASP Top 10
+          3. **Performance** — N+1 queries, unnecessary allocations, blocking calls
+          4. **Code quality** — clarity, naming, duplication, dead code
+          5. **Clinical safety** — for health/patient data code: data integrity, audit trails, NHS standards
+
+          Format your response as markdown with clear sections. Be concise and actionable.
+          If the diff is clean, say so clearly. Do not invent issues.'''
+
+          messages = [
+              {'role': 'system', 'content': system},
+              {'role': 'user', 'content': f'PR: {pr_title}\n\nDescription: {pr_body}\n\nDiff:\n{diff}'}
+          ]
+          print(json.dumps({'model': os.environ['AZURE_OPENAI_DEPLOYMENT'], 'messages': messages, 'max_tokens': 2000}))
+          ")
+
+          API_VERSION="2025-01-01-preview"
+          RESPONSE=$(curl -sf \
+            "${AZURE_OPENAI_ENDPOINT}openai/deployments/${AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version=${API_VERSION}" \
+            -H "Content-Type: application/json" \
+            -H "api-key: ${AZURE_OPENAI_API_KEY}" \
+            -d "$PAYLOAD")
+
+          echo "$RESPONSE" | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          content = data['choices'][0]['message']['content']
+          with open('/tmp/review.md', 'w') as f:
+              f.write(content)
+          print(content[:200])
+          "
+
+      - name: Post review comment
+        if: steps.diff.outputs.diff_size != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          BODY=$(cat /tmp/review.md)
+          COMMENT="## AI Code Review (Azure OpenAI gpt-5-mini)
+
+          ${BODY}
+
+          ---
+          *Automated review — use your own judgement. Powered by [auracare-openai-pr-review](https://portal.azure.com).*"
+
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$COMMENT"
