@@ -39,6 +39,9 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
+          # Normalize endpoint URL (remove trailing slash if present)
+          ENDPOINT="${AZURE_OPENAI_ENDPOINT%/}"
+          
           DIFF=$(cat /tmp/pr_truncated.diff)
           PAYLOAD=$(python3 -c "
           import json, os
@@ -61,23 +64,53 @@ jobs:
               {'role': 'system', 'content': system},
               {'role': 'user', 'content': f'PR: {pr_title}\n\nDescription: {pr_body}\n\nDiff:\n{diff}'}
           ]
-          print(json.dumps({'model': os.environ['AZURE_OPENAI_DEPLOYMENT'], 'messages': messages, 'max_tokens': 2000}))
+          # Note: Azure OpenAI doesn't require 'model' field when using deployment URLs
+          print(json.dumps({'messages': messages, 'max_tokens': 2000, 'temperature': 0.3}))
           ")
 
-          API_VERSION="2025-01-01-preview"
-          RESPONSE=$(curl -sf \
-            "${AZURE_OPENAI_ENDPOINT}openai/deployments/${AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version=${API_VERSION}" \
+          # Use stable API version
+          API_VERSION="2024-08-01-preview"
+          
+          echo "::group::Calling Azure OpenAI"
+          echo "Endpoint: ${ENDPOINT}/openai/deployments/${AZURE_OPENAI_DEPLOYMENT}/chat/completions"
+          echo "API Version: ${API_VERSION}"
+          echo "::endgroup::"
+          
+          # Remove -f flag and capture both stdout and stderr for better error diagnostics
+          HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/azure_response.json \
+            "${ENDPOINT}/openai/deployments/${AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version=${API_VERSION}" \
             -H "Content-Type: application/json" \
             -H "api-key: ${AZURE_OPENAI_API_KEY}" \
             -d "$PAYLOAD")
+          
+          echo "::group::Azure Response"
+          echo "HTTP Status: ${HTTP_CODE}"
+          cat /tmp/azure_response.json | jq . || cat /tmp/azure_response.json
+          echo "::endgroup::"
+          
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "::error::Azure OpenAI API returned HTTP ${HTTP_CODE}"
+            cat /tmp/azure_response.json
+            exit 1
+          fi
 
-          echo "$RESPONSE" | python3 -c "
+          python3 -c "
           import json, sys
-          data = json.load(sys.stdin)
+          with open('/tmp/azure_response.json') as f:
+              data = json.load(f)
+          
+          if 'error' in data:
+              print('::error::Azure OpenAI error:', data['error'])
+              sys.exit(1)
+          
+          if 'choices' not in data or not data['choices']:
+              print('::error::No choices in response')
+              sys.exit(1)
+          
           content = data['choices'][0]['message']['content']
           with open('/tmp/review.md', 'w') as f:
               f.write(content)
-          print(content[:200])
+          print('Review generated successfully')
           "
 
       - name: Post review comment
@@ -88,11 +121,11 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           BODY=$(cat /tmp/review.md)
-          COMMENT="## AI Code Review (Azure OpenAI gpt-5-mini)
+          COMMENT="## 🤖 AI Code Review
 
           ${BODY}
 
           ---
-          *Automated review — use your own judgement. Powered by [auracare-openai-pr-review](https://portal.azure.com).*"
+          *Automated review — use your own judgement. Powered by Azure OpenAI.*"
 
           gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$COMMENT"
