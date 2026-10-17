@@ -95,7 +95,7 @@ def vanta_sync_timer(myTimer: func.TimerRequest) -> None:
 
         # Create completed tasks for passing tests (user gets credit!)
         for test in passing_tests:
-            create_task_from_test(vault_name, test, priority='low', status='completed', assignee='Ahnaf')
+            create_task_from_test(vault_name, test, priority='low', status='completed', assignee=os.environ.get('TASK_ASSIGNEE') or None)
 
         # Create todo tasks for failing tests
         for test in failing_tests:

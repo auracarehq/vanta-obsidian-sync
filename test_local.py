@@ -217,7 +217,7 @@ def main():
         print("\nNext steps:")
         print("  1. Run: ./deploy.sh")
         print("  2. Check logs: az functionapp log tail --name vanta-obsidian-sync --resource-group auracare-rg")
-        print(f"  3. View results in: /Users/akn/projects/auracare/dkg/{OBSIDIAN_VAULT_PATH}/")
+        print(f"  3. View results in: <vault-path>/{OBSIDIAN_VAULT_PATH}/")
     else:
         print("❌ Some tests failed. Fix issues before deploying.")
     print("=" * 60)
