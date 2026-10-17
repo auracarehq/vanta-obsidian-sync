@@ -1,7 +1,7 @@
 # Vanta → Obsidian Sync - Status Report
 
 **Date:** 2026-07-20  
-**Repository:** https://github.com/akn101/vanta-obsidian-sync  
+**Repository:** https://github.com/<owner>/vanta-obsidian-sync  
 **Status:** ✅ **Obsidian Integration Working** | ⚠️ **Vanta API Needs Setup**
 
 ---
@@ -65,7 +65,7 @@ Files created:
 **Not Yet Deployed** - Run deployment once Vanta auth is working:
 
 ```bash
-cd /Users/akn/projects/auracare/vanta-sync-function
+cd ~/projects/auracare/vanta-sync-function
 ./deploy.sh
 ```
 
@@ -76,7 +76,7 @@ cd /Users/akn/projects/auracare/vanta-sync-function
 
 ### 3. Organization Transfer
 
-**Repository Location:** Currently under `akn101` personal account
+**Repository Location:** Currently under a personal GitHub account
 
 **To Transfer:**
 See [TRANSFER_TO_AURACAREHQ.md](TRANSFER_TO_AURACAREHQ.md) for instructions
@@ -124,7 +124,7 @@ CONTAINER_REGISTRY=auracareacr
 Files will be written to the **iCloud-synced dkg vault:**
 
 ```
-/Users/akn/Library/Mobile Documents/iCloud~md~obsidian/Documents/dkg/
+~/Library/Mobile Documents/iCloud~md~obsidian/Documents/dkg/
 └── Compliance/
     └── Vanta/
         ├── Vanta Security Tests.md              # Always latest
@@ -132,7 +132,7 @@ Files will be written to the **iCloud-synced dkg vault:**
         └── Vanta Security Tests - 2026-07-21.md
 ```
 
-**Note:** The vault at `/Users/akn/projects/auracare/dkg/` is a different vault. The Obsidian CLI correctly targets the iCloud-synced vault named "dkg" which will propagate via Obsidian Sync.
+**Note:** The vault at `~/projects/auracare/dkg/` is a different vault. The Obsidian CLI correctly targets the iCloud-synced vault named "dkg" which will propagate via Obsidian Sync.
 
 ---
 
@@ -183,7 +183,7 @@ Files will be written to the **iCloud-synced dkg vault:**
 - **Vanta API Docs:** https://developer.vanta.com
 - **Obsidian CLI:** `obsidian --help`
 - **Azure Functions:** https://docs.microsoft.com/azure/azure-functions/
-- **Repository:** https://github.com/akn101/vanta-obsidian-sync
+- **Repository:** https://github.com/<owner>/vanta-obsidian-sync
 
 ---
 

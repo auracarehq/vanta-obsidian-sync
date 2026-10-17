@@ -16,7 +16,7 @@ docker --version
 ## Deploy in 3 Commands
 
 ```bash
-cd /Users/akn/projects/auracare/vanta-sync-function
+cd ~/projects/auracare/vanta-sync-function
 
 # Option 1: Automated deployment
 ./deploy.sh
@@ -81,7 +81,7 @@ az functionapp function show \
 
 After the first sync (or manual trigger), check:
 ```
-/Users/akn/projects/auracare/dkg/Compliance/Vanta/
+~/projects/auracare/dkg/Compliance/Vanta/
 ```
 
 You should see:
@@ -117,8 +117,8 @@ When you make code changes:
 ```bash
 # Rebuild and push
 az acr login --name auracareacr
-docker build -t auracareacr.azurecr.io/vanta-sync:latest .
-docker push auracareacr.azurecr.io/vanta-sync:latest
+docker build -t <registry-host>/vanta-sync:latest .
+docker push <registry-host>/vanta-sync:latest
 
 # Restart function
 az functionapp restart \

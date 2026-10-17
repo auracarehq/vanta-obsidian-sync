@@ -1,6 +1,6 @@
 # Transfer Repository to auracarehq Organization
 
-The repository is currently at: **https://github.com/akn101/vanta-obsidian-sync**
+The repository is currently at: **https://github.com/<owner>/vanta-obsidian-sync**
 
 ## Why It's Under Personal Account
 
@@ -25,12 +25,12 @@ remote: To access this repository, you must re-authorize the OAuth Application '
 3. **Transfer the repository:**
    ```bash
    # From the repo directory
-   gh repo transfer akn101/vanta-obsidian-sync auracarehq
+   gh repo transfer <owner>/vanta-obsidian-sync auracarehq
    ```
 
 ### Option 2: Use GitHub Web UI
 
-1. Go to https://github.com/akn101/vanta-obsidian-sync
+1. Go to https://github.com/<owner>/vanta-obsidian-sync
 2. Click **Settings** → **General**
 3. Scroll to **Danger Zone**
 4. Click **Transfer ownership**
@@ -43,7 +43,7 @@ If transfer doesn't work:
 
 ```bash
 # Clone the current repo
-git clone https://github.com/akn101/vanta-obsidian-sync.git
+git clone https://github.com/<owner>/vanta-obsidian-sync.git
 cd vanta-obsidian-sync
 
 # Remove old remote
@@ -61,7 +61,7 @@ Update Azure Function deployment settings if the container registry or deploymen
 
 ## Current Status
 
-✅ **Repository Created:** https://github.com/akn101/vanta-obsidian-sync  
+✅ **Repository Created:** https://github.com/<owner>/vanta-obsidian-sync  
 ✅ **Code Pushed:** All files committed and pushed  
 ✅ **CI/CD Workflows:** Included (will need secrets configured)  
 ⏳ **Transfer Pending:** Awaiting SAML SSO re-authentication  

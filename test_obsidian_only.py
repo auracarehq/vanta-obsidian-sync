@@ -168,7 +168,7 @@ def main():
     if success:
         print("✅ Obsidian CLI test passed!")
         print(f"\nCheck your vault at:")
-        print(f"  /Users/akn/projects/auracare/dkg/{OBSIDIAN_VAULT_PATH}/")
+        print(f"  <vault-path>/{OBSIDIAN_VAULT_PATH}/")
     else:
         print("❌ Obsidian CLI test failed.")
     print("=" * 60)

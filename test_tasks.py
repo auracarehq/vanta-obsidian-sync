@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Test the task creation functionality"""
 
+import os
 import sys
-sys.path.insert(0, '/Users/akn/projects/auracare/vanta-sync-function')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from function_app import create_compliance_project, create_task_from_test, create_summary_report
 import requests
